@@ -13,7 +13,7 @@ Local → AWS with minimal conceptual redesign (validate-only TF mirror in
 | Terraform validate-only | same TF applied (plan → apply) | needs creds; watch NAT + snapshot costs |
 | GitHub Actions + ci.sh | Actions with OIDC deploy role | same 13 stages |
 | Prometheus/Grafana local | self-hosted or AMP + AMG | retention/cardinality bills |
-| `.env` file | Secrets Manager + CI secrets | TF `security` module already wires it |
+| `.env` file | Secrets Manager (or SSM Parameter Store for non-sensitive config) + CI secrets | TF `security` module already wires it |
 | Task container users | IAM execution/task roles | least-privilege split already modeled |
 | edge/internal networks | VPC + public/private subnets + SGs | TF `network`+`security` modules |
 | pg_dump files | RDS snapshots + S3 versioning | tested restores, PITR |

@@ -39,7 +39,7 @@ reference them); `docs/` holds the 7 syntheses with no root equivalent.
 | 27 Not required | no frontend/AI/real data/cloud | none built (verified: no UI dirs, synthetic seed) | repo tree | seed-synthetic test | no violations | PASS |
 | 28 Boundary | simulated vs engineered split | mocks thin, effort in infra (this repo's shape) | DECISIONS.md D2 | — (structural) | 20 commits show it | PASS |
 | 29 Thinking | Q&A answered w/ evidence | per-area answers across docs | all docs | policy tests | static answers | PARTIAL |
-| 30 Strong submission | 17 characteristics | each implemented (see rows above) | all | 78 tests | green | PARTIAL |
+| 30 Strong submission | 17 characteristics | each implemented (see rows above) | all | 81 tests | green | PARTIAL |
 | 31 Weak prevention | 15 anti-patterns absent | policy tests for exposure/secrets/gates/health | tests, ci.sh | hardening/sweep/gate tests | green | PARTIAL |
 | 32 AI assistance | AI_ASSISTANCE.md + accepted/changed/rejected | AI_ASSISTANCE.md + D15 | AI_ASSISTANCE.md | disclosure test | file complete | PASS |
 | 33 Demo | 31 phases, coherent story | DEMO_RUNBOOK.md + phase map | DEMO_RUNBOOK.md | narrative test | 26 steps + flex | PARTIAL |

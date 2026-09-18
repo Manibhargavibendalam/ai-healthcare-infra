@@ -76,7 +76,8 @@ def log(cid="none", level="info", operation=None, job_id=None,
     to `op` so one schema covers history: ts/level/svc/cid/op always present."""
     op = fields.pop("event", operation or "worker")
     rec = {"ts": datetime.now(UTC).isoformat(),
-           "level": level, "svc": "worker", "cid": cid, "op": op}
+           "level": level, "svc": "worker", "cid": cid, "op": op,
+           "event": op}
     if job_id is not None:
         rec["job_id"] = job_id
     if status is not None:

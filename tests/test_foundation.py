@@ -147,12 +147,32 @@ def test_api_metrics_exposed():
 
 
 def test_log_schema_all_services():
-    # evt()/log() is the contract: ts/level/svc/cid/op always present.
+    # evt()/log() contract (PDF §17): ts/level/svc/cid/op/event always present.
     import inspect
     for mod, fn in ((api, "evt"), (ai, "evt"), (ehr, "evt"), (worker, "log")):
         src = inspect.getsource(getattr(mod, fn))
-        for key in ('"ts"', '"level"', '"svc"', '"cid"', '"op"'):
+        for key in ('"ts"', '"level"', '"svc"', '"cid"', '"op"', '"event"'):
             assert key in src, f"{mod.__name__}.{fn}() missing {key}"
+
+
+def test_patient_by_id():
+    # PDF §4.1 example endpoint: route + int validation without a DB
+    # (422 fires before pg()); 200/404 paths are live-tested (T1).
+    r = TestClient(api.app).get("/api/v1/patients/not-an-int")
+    assert r.status_code == 422
+
+
+def test_deploy_history_has_duration():
+    for f in ("scripts/deploy.sh", "scripts/rollback.sh"):
+        src = (ROOT / f).read_text()
+        assert "duration_s" in src, f"{f} does not record deploy duration (§15)"
+
+
+def test_backup_db_aliases():
+    bkp = (ROOT / "scripts" / "backup-db.sh").read_text()
+    assert 'exec bash "$(dirname "$0")/backup.sh"' in bkp
+    rst = (ROOT / "scripts" / "restore-db.sh").read_text()
+    assert 'exec bash "$(dirname "$0")/restore.sh" "$@"' in rst
 
 
 def test_api_request_id_echoed():

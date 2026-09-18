@@ -35,6 +35,19 @@ services is `docker compose exec` + `/scripts/svc.py`, never a socket.
 | Grafana admin | `.env` → compose env | out of scope (local ops UI only) |
 | TLS cert | n/a (loopback) | `TF_VAR_alb_certificate_arn` (ACM) |
 
+## If a container is compromised (blast-radius analysis)
+
+Attacker in api container: sees only `internal` DNS (no host ports), runs as
+`appuser` on a read-only filesystem, holds NO secret values (only env refs
+injected at runtime), cannot reach the host or internet beyond the compose
+network. Lateral movement needs another exploit: DB/Redis accept only
+expected protocols, worker exposes no socket at all. Detection: error-rate
++ latency alerts, anomalous `api_db_errors_total`, audit log of mode changes.
+Response: `docker compose kill + up -d <svc>` (immutable image, no local
+state to preserve), rotate secrets if exfiltration is suspected, review
+`ehr_syncs`/`jobs` for malicious rows. Read-only + dropped caps + non-root
+exist precisely to make this scenario survivable.
+
 ## Least privilege: five roles, minimal permissions each
 
 | Role | Gets | Explicitly denied | Where |

@@ -44,7 +44,7 @@ def evt(level, operation, cid="none", job_id=None, status=None,
     when applicable. Single schema an operator can grep and join on."""
     rec = {"ts": datetime.now(UTC).isoformat(),
            "level": level, "svc": "api", "version": VERSION,
-           "cid": cid, "op": operation}
+           "cid": cid, "op": operation, "event": operation}
     if job_id is not None:
         rec["job_id"] = job_id
     if status is not None:
@@ -218,6 +218,21 @@ class PatientIn(BaseModel):
     first_name: str
     last_name: str
     dob: str  # YYYY-MM-DD
+
+
+@app.get("/api/v1/patients/{patient_id}")
+def get_patient(patient_id: int):
+    conn = pg()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT id, first_name, last_name, dob FROM patients WHERE id = %s",
+                    (patient_id,))
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="patient not found")
+    return dict(row)
 
 
 @app.post("/api/v1/patients", status_code=201)

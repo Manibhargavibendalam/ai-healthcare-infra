@@ -44,7 +44,8 @@ def evt(level, operation, cid="none", job_id=None, status=None,
         duration_ms=None, dependency=None, error=None, **extra):
     """Structured log event (M6): timestamp/level/service always present."""
     rec = {"ts": datetime.now(UTC).isoformat(),
-           "level": level, "svc": "ehr", "cid": cid, "op": operation}
+           "level": level, "svc": "ehr", "cid": cid, "op": operation,
+           "event": operation}
     if job_id is not None:
         rec["job_id"] = job_id
     if status is not None:

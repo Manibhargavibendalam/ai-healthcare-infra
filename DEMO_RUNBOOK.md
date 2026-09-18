@@ -28,6 +28,20 @@ fallback. Shell: PowerShell + `curl.exe`, `bash` = Git Bash, repo root
 `C:\Users\sunka\OneDrive\Desktop\ai-healthcare-infra`.
 Precondition: Docker engine running (`docker version` shows `Server:`).
 
+## Prerequisites per act (§24 compliance)
+
+| Act | Required prior state |
+|---|---|
+| 1–2 (system) | repo cloned; `.env` present (copy from `.env.example`) |
+| 3–4 (start) | engine up; ports 8080/3000/9090 free; ~2 GB images pullable |
+| 5–7 (ops) | base stack `up -d` + healthy; monitoring overlay up for §7 |
+| 8 (load) | base stack healthy; locust profile available |
+| 9–13 (failures) | base stack healthy; runbook §4 commands + `alerts.ps1` |
+| 14–15 (security) | `ci.sh` runnable (venv + scanners); `--demo-block` needs nothing else |
+| 16–19 (deploy) | base stack healthy; `deployments.jsonl` absent or seeded by prior runs |
+| 20–21 (recovery) | a `backups/manual-*.sql` + `.counts` from step 21's backup first |
+| 22–26 (books) | docs readable; `git log`, histories present |
+
 ## ACT 1 — THE SYSTEM (0:00–0:05)
 
 ### Step 1 — Scope: infrastructure, not healthcare (0:00, 1 min)

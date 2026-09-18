@@ -23,6 +23,7 @@ fi
 HISTORY="deployments.jsonl"
 READY_WAIT=120
 SMOKE_WAIT=60
+DEPLOY_T0=$(date +%s)
 
 gate_config() {
   docker compose config --quiet \
@@ -59,8 +60,9 @@ ACTOR="${DEPLOY_ACTOR:-${GITHUB_ACTOR:-$(git config user.name 2>/dev/null || who
 record_ok() { # append release to history (JSONL: grep/cut only, no jq/python)
   prev=$(tail -n 1 "$HISTORY" 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
   if [ -n "${prev:-}" ]; then prev_json="\"$prev\""; else prev_json="null"; fi
-  printf '{"version":"%s","ts":"%s","actor":"%s","prev":%s}\n' \
-    "$VERSION" "$(date -u +%FT%TZ)" "$ACTOR" "$prev_json" >> "$HISTORY"
+  printf '{"version":"%s","ts":"%s","actor":"%s","duration_s":%d,"prev":%s}\n' \
+    "$VERSION" "$(date -u +%FT%TZ)" "$ACTOR" "$(( $(date +%s) - DEPLOY_T0 ))" \
+    "$prev_json" >> "$HISTORY"
 }
 
 echo "== deploy $VERSION: structural gate =="

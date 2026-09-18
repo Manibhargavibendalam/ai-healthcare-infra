@@ -7,6 +7,7 @@
 set -uo pipefail
 HISTORY="deployments.jsonl"
 READY_WAIT=120
+RB_T0=$(date +%s)
 
 last_field() { # $1 = json key; prints value of last history line or empty
   tail -n 1 "$HISTORY" 2>/dev/null | grep -o "\"$1\":\"[^\"]*\"" | head -1 | cut -d'"' -f4 || true
@@ -30,8 +31,8 @@ docker compose up -d --no-deps api || { echo "ROLLBACK FAIL: api recreate broke"
 
 for _ in $(seq 1 $((READY_WAIT / 5))); do
   curl -s --max-time 5 http://127.0.0.1:8080/ready | grep -q '"status":"ready"' && {
-    printf '{"version":"%s (rollback)","ts":"%s","actor":"%s","prev":null}\n' \
-      "$TARGET" "$(date -u +%FT%TZ)" "$ACTOR" >> "$HISTORY"
+    printf '{"version":"%s (rollback)","ts":"%s","actor":"%s","duration_s":%d,"prev":null}\n' \
+      "$TARGET" "$(date -u +%FT%TZ)" "$ACTOR" "$(( $(date +%s) - RB_T0 ))" >> "$HISTORY"
     docker compose -f compose.yaml -f compose.monitoring.yaml exec -T alert-api \
       python /scripts/svc.py 8080 POST /deploys \
       "{\"version\":\"$TARGET\",\"status\":\"ok\"}" >/dev/null 2>&1 || true
