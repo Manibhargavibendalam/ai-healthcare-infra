@@ -1,0 +1,26 @@
+# M7 Alertmanager: single webhook pipeline. Grouping + long repeat_interval
+# keep pages rare; every notification lands in alert-api (JSONL log + GET
+# /alerts) so the evaluator can SEE what fired without SMTP/Slack.
+# Ops-local only: no host ports; Prometheus reaches it over `internal`.
+global:
+  resolve_timeout: 2m
+
+route:
+  receiver: webhook
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 2m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity = "critical"]
+      receiver: webhook
+      repeat_interval: 1h
+    - matchers: [severity = "warning"]
+      receiver: webhook
+
+receivers:
+  - name: webhook
+    webhook_configs:
+      - url: http://alert-api:8080/alerts
+        send_resolved: true
+        max_alerts: 20

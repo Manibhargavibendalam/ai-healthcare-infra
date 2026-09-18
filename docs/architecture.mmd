@@ -1,0 +1,36 @@
+%% PRIMARY ARCHITECTURE DIAGRAM (PDF: one clear diagram of the boundaries).
+%% Render: paste into https://mermaid.live or `npx @mermaid-js/mermaid-cli`.
+%% ASCII twin lives in NETWORKING.md; both describe compose.yaml exactly.
+flowchart TB
+    Client["operator / evaluator\n(host-local only)"]
+    Client -->|":8080 (sole published port)"| Nginx
+
+    subgraph EDGE["EDGE network"]
+        Nginx["NGINX\ncontrolled ingress\n:8080 + /healthz"]
+    end
+
+    Nginx -->|"proxy → api:8000\n(X-Request-ID preserved)"| API
+
+    subgraph INTERNAL["INTERNAL network (no published ports)"]
+        API["API :8000\nDMZ bridge (edge+internal)\n/v1/jobs, registry, metrics"]
+        AI["AI mock :8001\n/process + failure modes"]
+        EHR["EHR mock :8002\n7 modes + /mode switch"]
+        Worker["Worker (no ports)\nqueue → EHR/AI → Postgres\n:8003 container-local metrics"]
+        Redis[("Redis\njobs:queue + delay set")]
+        PG[("PostgreSQL\nregistry + jobs + ehr_syncs")]
+        Prom["Prometheus :9090\n7 scrape targets + 10 rules"]
+        Graf["Grafana :3000\n11-panel dashboard"]
+        AM["Alertmanager → alert-api :8080\nwebhook sink + gate hub"]
+    end
+
+    API --> AI
+    API --> Redis
+    API --> PG
+    Worker --> EHR
+    Worker --> AI
+    Worker --> Redis
+    Worker --> PG
+    Prom -.->|"scrape /metrics"| API
+    Prom -.->|"scrape"| AI & EHR & Worker
+    Prom -->|"fire →"| AM
+    Graf -->|"query"| Prom

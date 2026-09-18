@@ -1,0 +1,119 @@
+# M7 alert rules. Every rule carries: severity label + annotations
+# (summary/description/cause/action/verify). Thresholds mirror the Grafana
+# dashboard so screens and pages agree. `for:` durations suppress flaps:
+# 1m for hard-down signals, 3–5m for rates, 10m for saturation.
+# Noise policy: one tier per condition (no warn+crit duplicates), grouping
+# in Alertmanager, 4h repeat. See ALERTING.md for the operator story.
+groups:
+  - name: healthcare
+    interval: 15s
+    rules:
+      - alert: ApiDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "API is not being scraped (down >1m)"
+          description: "Prometheus target api:8000 down. Ingress likely 502s."
+          cause: "api container stopped/crashed, or OOM (check mem_limit)."
+          action: "docker compose ps api; docker compose logs --tail api; recover-api.ps1"
+          verify: "curl :8080/ready shows ready; up{job=\"api\"} back to 1"
+
+      - alert: ApiHighErrorRate
+        expr: 100 * sum(rate(api_http_requests_total{status=~"5.."}[2m])) / clamp_min(sum(rate(api_http_requests_total[2m])), 0.001) > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "API 5xx share above 5% for 5m"
+          description: "Error budget burning. Escalates to incident if >20%."
+          cause: "bad deploy, DB/Redis down (ready 503), or downstream AI/EHR outage."
+          action: "Check :8080/ready, api logs by cid, Grafana error panel; rollback if post-deploy."
+          verify: "error-rate panel back under 1%; probe jobs complete"
+
+      - alert: ApiHighLatency
+        expr: histogram_quantile(0.95, sum(rate(api_http_request_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "API p95 latency above 1s for 5m"
+          description: "Users see slow responses; queue may be backing up behind it."
+          cause: "DB slow queries, AI enrichment timeouts, or host CPU saturation."
+          action: "Check /api/v1/db/stats query_ms, ai latency, docker stats."
+          verify: "p95 panel under 0.5s for 10m"
+
+      - alert: WorkerDown
+        expr: up{job="worker"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Worker metrics endpoint down >2m (worker dead or wedged)"
+          description: "No processing; queue_depth will climb. Jobs buffer, nothing lost yet."
+          cause: "worker container stopped/crashed; DB outage wedging startup."
+          action: "docker compose ps worker; logs for loop_error; recover-worker.ps1; check restarts panel."
+          verify: "worker/status alive:true; queue drains to 0"
+
+      - alert: QueueBacklog
+        expr: queue_depth > 20
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Queue depth above 20 for 5m"
+          description: "Arrival rate exceeds processing; oldest_age_s is the user-visible latency."
+          cause: "worker down/slow, EHR degraded (retries piling), or genuine load burst."
+          action: "Check worker/status, EHR mode, /api/v1/queue/stats; scale-worker.ps1 if healthy-but-slow."
+          verify: "depth falling; oldest_age_s back under 30s"
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "PostgreSQL exporter reports down >1m"
+          description: "State store unreachable: API /ready 503s, worker parks jobs."
+          cause: "db container stopped, volume issue, or credentials misconfigured."
+          action: "docker compose ps db; pg logs; recover-db.ps1; verify row counts."
+          verify: "pg_up==1; /ready ready; SELECT count(*) intact"
+
+      - alert: DeployFailed
+        expr: increase(deploy_failed_total[10m]) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "A deployment failed in the last 10m"
+          description: "deploy.sh health-gate rejected a candidate; previous version still serving."
+          cause: "candidate /ready failing (bad code/config), or image pull failure."
+          action: "Read deploy log; fix candidate; re-run deploy.sh; rollback.sh if traffic moved."
+          verify: "api_build_info version pinned; probe job completes"
+
+      - alert: NodeSaturation
+        expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[2m]))) > 80 or 100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Host CPU >80% or memory >85% for 10m"
+          description: "Single-host simulation ceiling; everything degrades together past this."
+          cause: "load burst (locust shares the host), too many replicas, or runaway retry storm."
+          action: "docker stats; stop loadgen/scale back; check retry rates before adding replicas."
+          verify: "CPU under 60% and memory under 70% for 15m"
+
+      - alert: SecurityGateFailing
+        expr: min(security_gate_ok) == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "A security gate is failing (secret/scan/audit)"
+          description: "ci.sh posts per-gate 0/1 to alert-api; 0 means deploys must stop."
+          cause: "planted or real secret (gitleaks), HIGH/CRITICAL vuln (trivy), IaC misconfig, or vulnerable dep (pip-audit)."
+          action: "Run ci.sh security stage; fix finding or justify+suppress; re-run gates to green."
+          verify: "security_gate_ok{name} back to 1 for all gates"
+
+      - alert: EhrFailing
+        expr: sum(rate(ehr_sync_failures_total[5m])) > 0.05 or ehr_mode_ok == 0
+        for: 3m
+        labels: { severity: warning }
+        annotations:
+          summary: "EHR failing: error rate high or dependency degraded >3m"
+          description: "Jobs retry/fail; worker counters climb; API stays green (isolated)."
+          cause: "EHR mode flipped (drill or outage), auth expired (401s), or network cut."
+          action: "Check ehr /mode, ehr_syncs recent rows, worker failed/retried; ehr-recover.ps1 when drill ends."
+          verify: "failure rate 0; probe job completes attempts=1; ehr_mode_ok==1"

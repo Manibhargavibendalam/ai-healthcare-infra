@@ -1,0 +1,5 @@
+# Test-only deps. Service deps live per-service (services/*/requirements.txt).
+pytest
+httpx
+pyyaml
+requests

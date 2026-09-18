@@ -1,0 +1,19 @@
+.env
+.env.dev
+.env.prod
+__pycache__/
+*.pyc
+.pytest_cache/
+backups/
+.venv/
+# Terraform: ignore working dir + state, COMMIT the lock file.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+# Runtime release history (created by deploy.sh/rollback.sh, never committed).
+deployments.jsonl
+# Local CI audit trail (created by ci.sh; CI uploads its own as artifact).
+ci-report.jsonl

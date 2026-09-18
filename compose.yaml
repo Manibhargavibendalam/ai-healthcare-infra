@@ -1,0 +1,197 @@
+# M3: segmented networks. `edge` = ingress + api ONLY; `internal` = everything else.
+# Only nginx publishes a host port (127.0.0.1:8080). db/redis/worker/ai/ehr
+# publish NOTHING: operator access to them is `docker compose exec` plus
+# /scripts/svc.py (shell channel, not network exposure).
+# Limits use cpus/mem_limit (enforced by plain `docker compose up`;
+# deploy.resources is the swarm translation). init:true fixes PID-1 signal
+# handling; restart:unless-stopped survives daemon restarts.
+name: ai-healthcare-infra
+
+services:
+  db:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro # numbered, idempotent; migrate.sh for live DBs
+    networks: [internal]
+    # No `ports:` — reachable only inside appnet.
+    init: true
+    restart: unless-stopped
+    cap_drop: [ALL] # needs no extra caps (binds 5432 >1024 as unprivileged user)
+    # No read_only: official image needs writable /var/run/postgresql + /tmp
+    # beyond the data volume (documented exception, see SECURITY.md).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4.11-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redisdata:/data
+    networks: [internal]
+    # No `ports:` — reachable only inside appnet.
+    init: true
+    restart: unless-stopped
+    cap_drop: [ALL] # needs no extra caps (binds 6379 >1024 as unprivileged user)
+    # No read_only: RDB/AOF + runtime dirs need writes beyond /data
+    # (documented exception, see SECURITY.md).
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./services/api
+    image: healthcare-api:${API_TAG:-dev} # version pin: deploy.sh sets API_TAG per release
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      AI_URL: http://ai:8001
+      AI_TIMEOUT_SEC: "3"
+      API_VERSION: ${API_VERSION:-m3} # deploy.sh sets API_VERSION=version so /health proves the release
+    networks: [edge, internal] # the ONLY service on both: DMZ bridge by design
+    # No `ports:` — reached via nginx (edge) only.
+    init: true
+    restart: unless-stopped
+    read_only: true # logs->stdout, code in ro layers, /tmp via tmpfs below
+    tmpfs: [/tmp]
+    cap_drop: [ALL] # uvicorn binds 8000 >1024; needs no extra caps
+    cpus: "0.50"
+    mem_limit: 512m
+    mem_reservation: 256m
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  ai:
+    build: ./services/ai-service
+    environment:
+      AI_FAIL_MODE: ok
+      AI_LATENCY_SEC: "0.5"
+    volumes:
+      - ./scripts:/scripts:ro # operator exec channel (svc.py), not network exposure
+    networks: [internal]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cpus: "0.25"
+    mem_limit: 256m
+    mem_reservation: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  ehr:
+    build: ./services/ehr-mock
+    environment:
+      EHR_MODE: normal
+      EHR_SLOW_SLEEP_SEC: "3"
+      EHR_TIMEOUT_SLEEP_SEC: "30"
+    volumes:
+      - ./scripts:/scripts:ro # operator exec channel (svc.py), not network exposure
+    networks: [internal]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cpus: "0.25"
+    mem_limit: 256m
+    mem_reservation: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    build: ./services/worker
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      EHR_URL: http://ehr:8002
+      AI_URL: http://ai:8001
+      WORKER_TIMEOUT_SEC: "5"
+      MAX_ATTEMPTS: "3"
+      HEARTBEAT_SEC: "5"
+      BACKOFF_BASE_SEC: "2"
+      BACKOFF_CAP_SEC: "30"
+      WORKER_METRICS_PORT: "8003"
+    volumes:
+      - ./scripts:/scripts:ro # operator exec channel (svc.py), not network exposure
+    networks: [internal]
+    # No ports, ever: not even metrics (scraped via exec until monitoring net lands).
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cpus: "0.50"
+    mem_limit: 384m
+    mem_reservation: 192m
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      ehr: { condition: service_healthy }
+      ai: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/health')\""]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  nginx:
+    build: ./nginx
+    networks: [edge] # ingress lives ONLY on edge; cannot reach db/redis directly
+    ports:
+      - "127.0.0.1:8080:8080" # the single public door, host-local
+    init: true
+    restart: unless-stopped
+    read_only: true # unprivileged image is designed for this; writable paths via tmpfs
+    tmpfs: [/tmp, /var/cache/nginx, /run]
+    cap_drop: [ALL] # listens 8080 >1024 as nginx user; needs no extra caps
+    cpus: "0.25"
+    mem_limit: 128m
+    mem_reservation: 64m
+    depends_on:
+      api: { condition: service_healthy }
+
+  loadgen:
+    build: ./loadgen
+    profiles: [loadgen] # never starts by default: docker compose --profile loadgen run locust
+    networks: [edge]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    depends_on:
+      nginx: { condition: service_healthy }
+    # Override per run, e.g.: --headless -u 100 -r 20 --run-time 60s --host http://nginx:8080
+    command: ["--headless", "--users", "20", "--spawn-rate", "5", "--run-time", "2m", "--host", "http://nginx:8080"]
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  edge:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: false # inter-container only in effect (no published ports anywhere inside)

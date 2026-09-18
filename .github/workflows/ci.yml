@@ -1,0 +1,205 @@
+# CI/CD: 13 explicit stages across 10 jobs. Local mirror: bash scripts/ci.sh
+# (same gates, runnable without pushing; docker-gated stages SKIP there).
+# Deploy runs only on main and only after every gate is green: a red gate
+# means no deploy. `release` is ONE job (not three) because deploy, verify,
+# rollback-drill share one Docker stack — separate jobs would land on fresh
+# runners with no stack. Every run ends in `audit`, which records the evidence.
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read # least privilege: nothing here needs write
+
+jobs:
+  # STAGE 4 — code validation (lint policy: pyproject.toml; BLE/SIM excluded
+  # on purpose, see pyproject + D33)
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # STAGE 1
+      - uses: actions/setup-python@v5 # STAGE 2
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check services tests scripts loadgen
+
+  # STAGE 3 — unit tests (engine-free by design)
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install -r services/api/requirements.txt -r tests/requirements.txt
+      - name: Unit tests
+        run: pytest tests/ -q
+
+  # STAGE 3 — integration tests (live stack on the runner's Docker)
+  integration:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create .env (random dev secrets, never committed)
+        run: |
+          printf 'POSTGRES_DB=healthcare\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=ci-%s\nREDIS_PASSWORD=ci-%s\nGRAFANA_PASSWORD=ci-%s\n' \
+            "$(openssl rand -hex 8)" "$(openssl rand -hex 8)" "$(openssl rand -hex 8)" > .env
+      - run: docker compose build
+      - run: docker compose up -d
+      - run: bash scripts/m1-verify.sh
+      - run: bash scripts/net-audit.sh
+      - if: always()
+        run: docker compose down -v
+
+  # STAGE 5 — secret scan (blocks on any hit)
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+
+  # STAGE 6 — dependency audit (all six requirements files)
+  depsec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install pip-audit
+          pip-audit -r services/api/requirements.txt -r services/worker/requirements.txt \
+            -r services/ai-service/requirements.txt -r services/ehr-mock/requirements.txt \
+            -r services/alert-api/requirements.txt -r loadgen/requirements.txt
+
+  # STAGE 7 — IaC validation (fmt + validate credential-free, Checkov policy)
+  iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Format gate
+        run: terraform -chdir=terraform fmt -check -recursive
+      - name: Validate dev
+        run: |
+          terraform -chdir=terraform/environments/dev init -backend=false -input=false
+          terraform -chdir=terraform/environments/dev validate
+      - name: Validate prod
+        run: |
+          terraform -chdir=terraform/environments/prod init -backend=false -input=false
+          terraform -chdir=terraform/environments/prod validate
+      - name: Checkov policy scan
+        run: |
+          pip install checkov
+          checkov -d terraform/ --framework terraform --soft-fail-on LOW,MEDIUM
+
+  # STAGE 8 — build (only after every gate above is green)
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test, integration, secrets, depsec, iac]
+    steps:
+      - uses: actions/checkout@v4
+      - run: API_TAG=ci docker compose build
+
+  # STAGE 9 — image security (blocks on CRITICAL)
+  imagescan:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - run: API_TAG=ci docker compose build api worker
+      - name: Scan api image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: healthcare-api:ci
+          severity: CRITICAL
+          exit-code: "1"
+      - name: Scan worker image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ai-healthcare-infra-worker
+          severity: CRITICAL
+          exit-code: "1"
+
+  # STAGES 10–13 — release on ONE runner (deploy, verify, rollback drill share
+  # a single Docker stack; separate jobs would land on fresh runners with none).
+  # STAGE 12 (controlled release) is proven by deploy.sh itself: traffic moves
+  # only after the candidate passes /ready — the job asserts the new version
+  # serves. STAGE 13: second healthy release, roll back, prove old serves again.
+  release:
+    runs-on: ubuntu-latest
+    needs: [build, imagescan]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create .env
+        run: |
+          printf 'POSTGRES_DB=healthcare\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=ci-%s\nREDIS_PASSWORD=ci-%s\nGRAFANA_PASSWORD=ci-%s\n' \
+            "$(openssl rand -hex 8)" "$(openssl rand -hex 8)" "$(openssl rand -hex 8)" > .env
+      - run: docker compose up -d
+      - name: STAGE 10 — health-gated deploy
+        run: bash scripts/deploy.sh "${{ github.sha }}"
+      - name: STAGE 11 — health verification
+        run: |
+          curl -sf --max-time 10 http://127.0.0.1:8080/ready
+          curl -sf --max-time 10 http://127.0.0.1:8080/health | grep "${{ github.sha }}"
+          curl -sf --max-time 10 http://127.0.0.1:8080/api/v1/db/stats
+          J=$(curl -sf --max-time 10 -X POST http://127.0.0.1:8080/api/v1/jobs \
+            -H 'Content-Type: application/json' -d '{"type":"appointment","patient_id":1}')
+          echo "$J" | grep -q '"status":"queued"'
+      - name: STAGE 12 — release record (second healthy release)
+        run: bash scripts/deploy.sh "${{ github.sha }}-r2"
+      - name: STAGE 13 — rollback to previous, old version serves again
+        run: |
+          bash scripts/rollback.sh
+          curl -sf --max-time 10 http://127.0.0.1:8080/health | grep "${{ github.sha }}"
+      - if: failure()
+        run: docker compose logs --tail 50 api
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ github.sha }}
+          path: deployments.jsonl
+
+  # Auditability: one table per run, whatever happened (commit, actor, every
+  # stage result, release history artifact).
+  audit:
+    runs-on: ubuntu-latest
+    needs: [lint, test, integration, secrets, depsec, iac, build, imagescan,
+            release]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-evidence-${{ github.sha }}
+        continue-on-error: true # PR runs never release; the table still records
+      - name: Record evidence
+        run: |
+          {
+            echo "## Release evidence — ${{ github.sha }}"
+            echo ""
+            echo "| Item | Value |"
+            echo "|---|---|"
+            echo "| commit | ${{ github.sha }} |"
+            echo "| initiated by | ${{ github.actor }} via ${{ github.event_name }} |"
+            echo "| ref | ${{ github.ref }} |"
+            echo "| lint (4) | ${{ needs.lint.result }} |"
+            echo "| unit tests (3) | ${{ needs.test.result }} |"
+            echo "| integration (3) | ${{ needs.integration.result }} |"
+            echo "| secrets (5) | ${{ needs.secrets.result }} |"
+            echo "| depsec (6) | ${{ needs.depsec.result }} |"
+            echo "| iac (7) | ${{ needs.iac.result }} |"
+            echo "| build (8) | ${{ needs.build.result }} |"
+            echo "| image scan (9) | ${{ needs.imagescan.result }} |"
+            echo "| release 10-13 | ${{ needs.release.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ -f deployments.jsonl ] && cat deployments.jsonl >> "$GITHUB_STEP_SUMMARY" || true

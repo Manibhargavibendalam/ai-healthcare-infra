@@ -1,0 +1,8 @@
+# Keep LF endings where the runtime cares (bash breaks on CRLF).
+*.sh text eol=lf
+*.py text eol=lf
+*.sql text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf
+* text=auto

@@ -1,0 +1,126 @@
+{
+  "title": "Healthcare Platform — Operations",
+  "uid": "healthcare-ops",
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1, "title": "1. API healthy? (up + ready)",
+      "type": "stat", "datasource": "Prometheus",
+      "targets": [{ "expr": "up{job=\"api\"}" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "value": 0, "color": "red" }, { "value": 1, "color": "green" } ] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2, "title": "2. Request rate (req/s)",
+      "type": "timeseries", "datasource": "Prometheus",
+      "targets": [{ "expr": "sum(rate(api_http_requests_total[1m]))" }],
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+    },
+    {
+      "id": 3, "title": "3. Error rate % (warn >5%, crit >20%)",
+      "type": "timeseries", "datasource": "Prometheus",
+      "targets": [{ "expr": "100 * sum(rate(api_http_requests_total{status=~\"5..\"}[1m])) / clamp_min(sum(rate(api_http_requests_total[1m])), 0.001)" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "value": 0, "color": "green" }, { "value": 5, "color": "yellow" }, { "value": 20, "color": "red" } ] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+    },
+    {
+      "id": 4, "title": "4. Latency p95 s (warn >1s)",
+      "type": "timeseries", "datasource": "Prometheus",
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(api_http_request_duration_seconds_bucket[5m])) by (le))" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "value": 0, "color": "green" }, { "value": 1, "color": "red" } ] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+    },
+    {
+      "id": 5, "title": "5. Workers processing (jobs/s)",
+      "type": "timeseries", "datasource": "Prometheus",
+      "targets": [{ "expr": "rate(jobs_processed_total[1m])" }],
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 4 }
+    },
+    {
+      "id": 6, "title": "6. Queue depth (warn >20, crit >100)",
+      "type": "timeseries", "datasource": "Prometheus",
+      "targets": [{ "expr": "queue_depth" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "value": 0, "color": "green" }, { "value": 20, "color": "yellow" }, { "value": 100, "color": "red" } ] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 4 }
+    },
+    {
+      "id": 7, "title": "7. Worker restarts (delta)",
+      "type": "stat", "datasource": "Prometheus",
+      "targets": [{ "expr": "delta(worker_restarts_total[15m])" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "value": 0, "color": "green" }, { "value": 1, "color": "red" } ] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 4 }
+    },
+    {
+      "id": 8, "title": "8. PostgreSQL reachable? (pg_up)",
+      "type": "stat", "datasource": "Prometheus",
+      "targets": [{ "expr": "pg_up" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "value": 0, "color": "red" }, { "value": 1, "color": "green" } ] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 4 }
+    },
+    {
+      "id": 9, "title": "9. EHR failing? (failures/s + mode)",
+      "type": "timeseries", "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(rate(ehr_sync_failures_total[1m]))" },
+        { "expr": "ehr_mode_ok" }
+      ],
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "id": 10, "title": "10. Deployment healthy? (build info)",
+      "type": "table", "datasource": "Prometheus",
+      "targets": [{ "expr": "api_build_info", "format": "table" }],
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 8 }
+    },
+    {
+      "id": 11, "title": "11. Saturation: CPU + mem",
+      "type": "timeseries", "datasource": "Prometheus",
+      "targets": [
+        { "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])))" },
+        { "expr": "100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))" }
+      ],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "value": 0, "color": "green" }, { "value": 80, "color": "yellow" }, { "value": 95, "color": "red" } ] } } },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 12 }
+    },
+    {
+      "id": 12, "title": "12. Worker healthy? (up)",
+      "type": "stat", "datasource": "Prometheus",
+      "targets": [{ "expr": "up{job=\"worker\"}" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "value": 0, "color": "red" }, { "value": 1, "color": "green" } ] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 }
+    },
+    {
+      "id": 13, "title": "13. Failed / retried jobs (rate)",
+      "type": "timeseries", "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(rate(jobs_failed_total[1m]))" },
+        { "expr": "sum(rate(jobs_retried_total[1m]))" }
+      ],
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 16 }
+    },
+    {
+      "id": 14, "title": "14. EHR latency p95 s",
+      "type": "timeseries", "datasource": "Prometheus",
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(ehr_sync_duration_seconds_bucket[5m])) by (le))" }],
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 16 }
+    },
+    {
+      "id": 15, "title": "15. Overall availability (targets up)",
+      "type": "stat", "datasource": "Prometheus",
+      "targets": [{ "expr": "avg(up{job=~\"api|worker|postgres\"})" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "value": 0, "color": "red" }, { "value": 1, "color": "green" } ] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 16 }
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+# M8 deploy overlay: the release CANDIDATE. Same build context as `api`,
+# but a separate service name so old + new coexist on `internal` while the
+# gate decides. No build stanza here on purpose: deploy.sh builds+tags the
+# image first, the candidate only RUNS the prebuilt tag. No ports ever:
+# readiness is polled via exec + /scripts/svc.py (operator channel).
+# Apply only via scripts/deploy.sh, never by hand.
+services:
+  api-candidate:
+    image: healthcare-api:${API_TAG:?API_TAG must be set by deploy.sh}
+    volumes:
+      - ./scripts:/scripts:ro # readiness polling via svc.py, not network exposure
+    networks: [internal]
+    init: true
+    restart: "no" # candidate must never restart itself into looking healthy
+    read_only: true # same policy as api: logs->stdout, /tmp via tmpfs
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cpus: "0.50"
+    mem_limit: 512m
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      AI_URL: http://ai:8001
+      AI_TIMEOUT_SEC: "3"
+      API_VERSION: ${API_TAG}
+      BREAK_READY: "${BREAK_READY:-0}" # deploy.sh --broken sets 1: v3-style failure drill
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5

@@ -1,0 +1,128 @@
+# M6 monitoring overlay. Apply WITH the base stack:
+#   docker compose -f compose.yaml -f compose.monitoring.yaml up -d
+# Prometheus + Grafana bind host-local only (127.0.0.1), never LAN —
+# same rule as the nginx door. Exporters have NO host ports at all.
+# All monitoring traffic stays on `internal`: Prometheus scrapes the
+# container-local :8000–8003 metrics that were never published.
+name: ai-healthcare-infra
+
+services:
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+    networks: [internal]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cpus: "0.25"
+    mem_limit: 128m
+    depends_on:
+      db: { condition: service_healthy }
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    networks: [internal]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cpus: "0.25"
+    mem_limit: 128m
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - promdata:/prometheus
+    networks: [internal]
+    cap_drop: [ALL]
+    # No read_only: TSDB WAL + lock files need writes beyond /prometheus
+    # (documented exception, see SECURITY.md; verify live on first boot).
+    ports:
+      - "127.0.0.1:9090:9090" # ops-local only
+    init: true
+    restart: unless-stopped
+    cpus: "0.50"
+    mem_limit: 512m
+    depends_on:
+      api: { condition: service_healthy }
+      alertmanager: { condition: service_started }
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - amdata:/alertmanager
+    networks: [internal]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    # No host ports: ops reads alerts via Prometheus UI + alert-api (exec).
+    init: true
+    restart: unless-stopped
+    cpus: "0.25"
+    mem_limit: 128m
+
+  alert-api:
+    build: ./services/alert-api
+    environment:
+      ALERT_STORE: /data/alerts.jsonl
+    volumes:
+      - alertdata:/data
+      - ./scripts:/scripts:ro # deploy.sh/rollback.sh post /gates + /deploys via svc.py
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    networks: [internal]
+    # No host ports: reached via exec + Prometheus scrape.
+    init: true
+    restart: unless-stopped
+    cpus: "0.25"
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.6.16
+    cap_drop: [ALL]
+    # No read_only: sqlite + plugins + sessions need writes beyond /var/lib/grafana
+    # (documented exception, see SECURITY.md; verify live on first boot).
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    networks: [internal]
+    ports:
+      - "127.0.0.1:3000:3000" # ops-local only
+    init: true
+    restart: unless-stopped
+    cpus: "0.50"
+    mem_limit: 512m
+    depends_on:
+      prometheus: { condition: service_started }
+
+volumes:
+  promdata:
+  grafanadata:
+  amdata:
+  alertdata:

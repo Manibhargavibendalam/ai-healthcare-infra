@@ -1,0 +1,15 @@
+# Lint policy (M10, stage 4): ruff check is a CI gate and a ci.sh gate.
+# Selected: E (errors, line length 100 — terminal+review friendly),
+# F (pyflakes), I (import order), UP (pyupgrade), W (whitespace).
+# Deliberately NOT selected: BLE/S110/SIM (bare `except Exception` is our
+# documented resilience pattern — "never let one bad job kill the loop" —
+# and rewriting it for a linter would make failure handling worse).
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "W"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["measure"]

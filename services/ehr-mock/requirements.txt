@@ -1,0 +1,4 @@
+fastapi==0.135.0
+uvicorn==0.30.6
+starlette==1.6.0
+prometheus_client==0.21.1

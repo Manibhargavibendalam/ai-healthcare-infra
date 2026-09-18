@@ -1,0 +1,11 @@
+# Local override pattern (copy to compose.override.yaml to use; gitignored).
+# Compose auto-loads compose.override.yaml next to compose.yaml.
+# Keeps PERSONAL tweaks out of the shared definition. Example:
+#
+# services:
+#   api:
+#     ports:
+#       - "127.0.0.1:9000:8000"   # my laptop already runs something on 8000
+#   worker:
+#     environment:
+#       WORKER_TIMEOUT_SEC: "2"   # faster failure drills while developing

@@ -1,0 +1,7 @@
+fastapi==0.135.0
+uvicorn==0.30.6
+starlette==1.6.0
+psycopg2-binary==2.9.10
+redis==5.2.1
+prometheus_client==0.21.1
+requests==2.33.0
