@@ -32,9 +32,34 @@ from pydantic import BaseModel
 
 MODES = ["normal", "slow", "timeout", "temp_failure", "auth_failure",
          "unavailable", "unknown"]
-MODE = os.environ.get("EHR_MODE", "normal")
+MODE_DEFAULT = os.environ.get("EHR_MODE", "normal")
+MODE_FILE = os.environ.get("EHR_MODE_FILE", "/tmp/ehr_mode")
 SLOW = float(os.environ.get("EHR_SLOW_SLEEP_SEC", "3"))
 TIMEOUT_SLEEP = float(os.environ.get("EHR_TIMEOUT_SLEEP_SEC", "30"))
+
+
+def get_mode():
+    # LIVE BUGFIX: uvicorn runs --workers 2, and a process-global MODE is
+    # invisible across workers (POST /mode hit worker A, /sync hit worker B
+    # still on "normal" — caught live in T6). The mode file is shared via
+    # /tmp (tmpfs, writable under read_only). Restart resets to env default.
+    try:
+        with open(MODE_FILE) as f:
+            m = f.read().strip()
+        if m in MODES:
+            return m
+    except OSError:
+        pass
+    return MODE_DEFAULT
+
+
+def put_mode(mode):
+    parent = os.path.dirname(MODE_FILE)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(MODE_FILE, "w") as f:
+        f.write(mode)
+    EHR_MODE_OK.set(1 if mode in ("normal", "slow") else 0)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ehr")
@@ -102,20 +127,21 @@ async def _ctx(request: Request, call_next):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "ehr", "mode": MODE}
+    return {"status": "ok", "service": "ehr", "mode": get_mode()}
 
 
 @app.get("/ready")
 def ready():
-    if MODE == "unavailable":
+    mode = get_mode()
+    if mode == "unavailable":
         return JSONResponse(status_code=503,
-                            content={"status": "not_ready", "mode": MODE})
-    return {"status": "ready", "mode": MODE}
+                            content={"status": "not_ready", "mode": mode})
+    return {"status": "ready", "mode": mode}
 
 
 @app.get("/mode")
-def get_mode():
-    return {"mode": MODE}
+def read_mode():
+    return {"mode": get_mode()}
 
 
 class ModeIn(BaseModel):
@@ -124,15 +150,13 @@ class ModeIn(BaseModel):
 
 @app.post("/mode")
 def set_mode(m: ModeIn):
-    global MODE
     if m.mode not in MODES:
         raise HTTPException(status_code=400,
                             detail=f"unknown mode, choose from {MODES}")
-    MODE = m.mode
-    EHR_MODE_OK.set(1 if m.mode in ("normal", "slow") else 0)
-    evt("warning", "mode_change", status=200, mode=MODE,
-        error=None if MODE == "normal" else "failure injection active")
-    return {"mode": MODE}
+    put_mode(m.mode)
+    evt("warning", "mode_change", status=200, mode=m.mode,
+        error=None if m.mode == "normal" else "failure injection active")
+    return {"mode": m.mode}
 
 
 @app.post("/admin/mode")
@@ -151,44 +175,45 @@ def sync(s: SyncIn, request: Request):
     cid = request.headers.get("x-request-id") or "none"
     t0 = time.time()
     ms = lambda: int((time.time() - t0) * 1000)  # noqa: E731
-    base = {"mode": MODE, "job_id": s.job_id, "correlation_id": cid}
-    status, synced, outcome = outcome_for(MODE)
-    EHR_REQ.labels(MODE, str(status)).inc()
+    mode = get_mode()
+    base = {"mode": mode, "job_id": s.job_id, "correlation_id": cid}
+    status, synced, outcome = outcome_for(mode)
+    EHR_REQ.labels(mode, str(status)).inc()
     if status != 200:
-        EHR_FAIL.labels(MODE).inc()
-    if MODE == "normal":
-        EHR_LAT.labels(MODE).observe(time.time() - t0)
+        EHR_FAIL.labels(mode).inc()
+    if mode == "normal":
+        EHR_LAT.labels(mode).observe(time.time() - t0)
         evt("info", "sync", cid=cid, job_id=s.job_id, status=200,
             duration_ms=ms(), outcome=outcome)
         return {"synced": True, "outcome": "applied",
                 "latency_ms": ms(), **base}
-    if MODE == "slow":
+    if mode == "slow":
         time.sleep(SLOW)
-        EHR_LAT.labels(MODE).observe(time.time() - t0)
+        EHR_LAT.labels(mode).observe(time.time() - t0)
         evt("warning", "sync", cid=cid, job_id=s.job_id, status=200,
             duration_ms=ms(), outcome=outcome, note="slow EHR response")
         return {"synced": True, "outcome": "applied",
                 "latency_ms": ms(), "note": "slow EHR response", **base}
-    if MODE == "timeout":
+    if mode == "timeout":
         EHR_TIMEOUTS.inc()
         evt("warning", "sync", cid=cid, job_id=s.job_id,
             duration_ms=int(TIMEOUT_SLEEP * 1000), outcome=outcome,
             note="hanging past worker timeout")
         time.sleep(TIMEOUT_SLEEP)
         return {"synced": True, "outcome": "applied", **base}
-    if MODE == "temp_failure":
+    if mode == "temp_failure":
         evt("error", "sync", cid=cid, job_id=s.job_id, status=500,
             duration_ms=ms(), outcome=outcome, error="EHR internal error")
         return JSONResponse(status_code=500,
                             content={"synced": False, "outcome": "failed",
                                      "error": "EHR internal error", **base})
-    if MODE == "auth_failure":
+    if mode == "auth_failure":
         evt("warning", "sync", cid=cid, job_id=s.job_id, status=401,
             duration_ms=ms(), outcome=outcome, error="EHR auth failed")
         return JSONResponse(status_code=401,
                             content={"synced": False, "outcome": "rejected",
                                      "error": "EHR auth failed", **base})
-    if MODE == "unavailable":
+    if mode == "unavailable":
         evt("error", "sync", cid=cid, job_id=s.job_id, status=503,
             duration_ms=ms(), outcome=outcome, error="EHR unavailable")
         return JSONResponse(status_code=503,

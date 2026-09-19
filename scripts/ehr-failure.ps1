@@ -4,7 +4,7 @@ param([Parameter(Mandatory=$true)][ValidateSet('normal','slow','timeout','temp_f
 $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path $PSScriptRoot -Parent)
 try {
-  docker compose exec -T ehr-mock python /scripts/svc.py 8002 POST /mode "{`"mode`":`"$Mode`"}"
+  docker compose exec -T ehr python /scripts/svc.py 8002 POST /mode "{`"mode`":`"$Mode`"}"
   Write-Output "EHR mode=$Mode. Expected job behavior:"
   Write-Output "  slow         -> completes, processing_ms >= ~3000"
   Write-Output "  timeout      -> retries w/ backoff (2s,4s), then failed"

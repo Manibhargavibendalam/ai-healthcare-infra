@@ -179,6 +179,20 @@ failures auto-run `rollback.sh` inline (the script recovers, not just
 reports). Version rides in response + every log line + `api_build_info`:
 three independent witnesses that the release serving is the release claimed.
 
+## D37 — First live boot caught 6 blind spots (all fixed, all verified live)
+Static review missed what one `up` exposed: (1) `cap_drop: ALL` kills
+gosu/setpriv entrypoints (postgres exit 1, redis exit 127) — dropped the
+drop for official images, kept containment via no-ports+private-net;
+(2) redis healthcheck used an env var never injected into the container
+(empty password → WRONGPASS) — added runtime-only `environment:`;
+(3) EHR mode in process-global diverged across 2 uvicorn workers — moved to
+a shared file in tmpfs; (4) Git Bash rewrites `/container/paths` for
+docker.exe — `MSYS2_ARG_CONV_EXCL='*'` in all .sh files; (5) scripts said
+`ehr-mock`, compose service is `ehr` — fixed every service-position ref;
+(6) net-audit assumed `0.0.0.0` output and `docker compose port` semantics —
+now asserts host-local binding via `PortBindings` inspect. Proof the fixes
+hold: T1–T10 `ALL M3 TESTS PASSED (49 checks)` + `NET AUDIT PASSED (9 checks)`.
+
 ## D35 — Recovery is two loops; incidents are reports, drills are definitions (M12)
 Backup and restore VERIFY themselves (pre-counts, COPY markers, size floor,
 count comparison) because an unverified backup is a hope, not a control —

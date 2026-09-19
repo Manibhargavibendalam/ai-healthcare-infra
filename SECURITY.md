@@ -90,7 +90,7 @@ Policy is unit-tested (`test_container_hardening` fails the build on drift).
 | api, ai, ehr-mock, worker, alert-api, loadgen, api-candidate | ✅ + `tmpfs: /tmp` | logs→stdout, code in ro layers |
 | nginx | ✅ + `tmpfs: /tmp,/var/cache/nginx,/run` | unprivileged image designed for this |
 | postgres-exporter, node-exporter, alertmanager | ✅ + `tmpfs: /tmp` | static binaries, state in volumes |
-| db, redis | ❌ (cap_drop only) | official images need writable runtime dirs beyond data volumes |
+| db, redis | ❌ neither (LIVE-PROVEN: entrypoints drop root→service user via gosu/setpriv, which needs SETUID/SETGID — dropping ALL caps boot-loops them) | containment = no ports + internal net + own runtime user + auth |
 | prometheus, grafana | ❌ (cap_drop only) | TSDB WAL / sqlite+plugins need writes beyond data volumes |
 
 Exceptions are an explicit test list, not an oversight — and every exception

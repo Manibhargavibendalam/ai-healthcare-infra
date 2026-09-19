@@ -152,7 +152,7 @@ T+7m   probe completes attempts=1; failure rate 0; alert resolves
 
 ## INCIDENT F6 — Container failure (generic)
 
-- Failure: `fail-service.ps1 -Service <ai|ehr-mock|redis|nginx|db>`.
+- Failure: `fail-service.ps1 -Service <ai|ehr|redis|nginx|db>` (compose service names, not directory names).
 - Detection: `docker compose ps` (exited/unhealthy) + dependent symptoms
   (e.g., ai down → appointments `ai_degraded:true`; redis down → api `/ready` 503).
 - Investigation: `docker compose logs --tail <svc>` exit cause; dependents' logs.

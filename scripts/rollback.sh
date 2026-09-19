@@ -5,6 +5,9 @@
 # Refuses when there is no history (fail-safe: never guess a version).
 # Run from repo root in Git Bash.
 set -uo pipefail
+# Git Bash on Windows mangles /container/paths for docker.exe; all paths
+# in this script are container-internal, so disable conversion entirely.
+export MSYS2_ARG_CONV_EXCL='*'
 HISTORY="deployments.jsonl"
 READY_WAIT=120
 RB_T0=$(date +%s)

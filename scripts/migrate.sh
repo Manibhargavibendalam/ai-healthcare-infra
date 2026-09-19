@@ -5,6 +5,9 @@
 # Needs: PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE in the environment.
 # Usage (Git Bash):  PGPASSWORD=... bash scripts/migrate.sh
 set -uo pipefail
+# Git Bash on Windows mangles /container/paths for docker.exe; all paths
+# in this script are container-internal, so disable conversion entirely.
+export MSYS2_ARG_CONV_EXCL='*'
 : "${PGHOST:=127.0.0.1}" "${PGPORT:=5432}" "${PGUSER:=app}" "${PGDATABASE:=healthcare}"
 PSQL=(docker compose exec -T -e "PGPASSWORD=$PGPASSWORD" db psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -t -A)
 have() { "${PSQL[@]}" -c "SELECT 1 FROM schema_migrations WHERE version='$1';" | grep -q 1; }

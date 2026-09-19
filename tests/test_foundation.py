@@ -206,7 +206,7 @@ def test_ehr_mode_cycle():
             assert c.post("/mode", json={"mode": m}).json() == {"mode": m}
         assert c.get("/health").json()["mode"] == "unknown"
     finally:
-        ehr.MODE = "normal"
+        ehr.put_mode("normal")
 
 
 def test_ehr_ready_only_fails_when_gone():
@@ -218,7 +218,7 @@ def test_ehr_ready_only_fails_when_gone():
         c.post("/mode", json={"mode": "unavailable"})
         assert c.get("/ready").status_code == 503
     finally:
-        ehr.MODE = "normal"
+        ehr.put_mode("normal")
 
 
 def test_ehr_sync_matrix():
@@ -234,7 +234,7 @@ def test_ehr_sync_matrix():
         c.post("/mode", json={"mode": "unavailable"})
         assert c.post("/sync", json={"job_id": 1}).status_code == 503
     finally:
-        ehr.MODE = "normal"
+        ehr.put_mode("normal")
 
 
 def test_ehr_unknown_outcome():
@@ -248,7 +248,7 @@ def test_ehr_unknown_outcome():
         assert body["outcome"] == "unknown" and body["synced"] is None
         assert body["correlation_id"] == "cid-9"
     finally:
-        ehr.MODE = "normal"
+        ehr.put_mode("normal")
 
 
 # --- AI mock ---
@@ -502,10 +502,14 @@ def test_container_hardening():
                    "alert-api", "alertmanager", "postgres-exporter",
                    "node-exporter", "api-candidate"}
     ro_exception = {"db", "redis", "prometheus", "grafana"}  # see SECURITY.md
+    no_drop_exception = {"db", "redis"}  # LIVE-PROVEN: gosu/setpriv entrypoints
     all_svcs = {**base, **mon, **cand}
     for name, svc in all_svcs.items():
         assert svc.get("privileged") is not True, f"{name} is privileged"
-        assert svc.get("cap_drop") == ["ALL"], f"{name} keeps Linux caps"
+        if name in no_drop_exception:
+            assert "cap_drop" not in svc, f"{name} must keep entrypoint caps"
+        else:
+            assert svc.get("cap_drop") == ["ALL"], f"{name} keeps Linux caps"
     for name in ro_expected:
         assert all_svcs[name].get("read_only") is True, f"{name} not read-only"
         assert "/tmp" in str(all_svcs[name].get("tmpfs", [])), f"{name} lacks /tmp tmpfs"
@@ -746,7 +750,7 @@ def test_ehr_admin_aliases():
         body = c.post("/ehr/sync", json={"job_id": 3}).json()
         assert body["outcome"] == "applied" and body["correlation_id"] == "none"
     finally:
-        ehr.MODE = "normal"
+        ehr.put_mode("normal")
 
 
 def test_worker_processing_seconds_metric():

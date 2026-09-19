@@ -10,6 +10,9 @@
 # watches gitleaks fail, cleans up, exits 1 — the pipeline blocking).
 # Run from repo root.
 set -uo pipefail
+# Git Bash on Windows mangles /container/paths for docker.exe; all paths
+# in this script are container-internal, so disable conversion entirely.
+export MSYS2_ARG_CONV_EXCL='*'
 PASS=0; FAIL=0; SKIP=0
 GATES=()  # "name:ok|fail" for the alert-api post + summary
 

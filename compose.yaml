@@ -21,9 +21,11 @@ services:
     # No `ports:` — reachable only inside appnet.
     init: true
     restart: unless-stopped
-    cap_drop: [ALL] # needs no extra caps (binds 5432 >1024 as unprivileged user)
-    # No read_only: official image needs writable /var/run/postgresql + /tmp
-    # beyond the data volume (documented exception, see SECURITY.md).
+    # NO cap_drop here (verified live): the official entrypoint starts as root
+    # and drops to `postgres` via gosu, which needs SETUID/SETGID. Dropping
+    # ALL caps kills it at boot (exit 1, restart loop). Same for read_only.
+    # Containment comes from: no published ports + internal net + own user
+    # at runtime. See SECURITY.md exceptions.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -33,15 +35,18 @@ services:
   redis:
     image: redis:7.4.11-alpine
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD} # runtime-only (healthcheck needs it);
+      # never baked: official image, no build step, value from host .env
     volumes:
       - redisdata:/data
     networks: [internal]
     # No `ports:` — reachable only inside appnet.
     init: true
     restart: unless-stopped
-    cap_drop: [ALL] # needs no extra caps (binds 6379 >1024 as unprivileged user)
-    # No read_only: RDB/AOF + runtime dirs need writes beyond /data
-    # (documented exception, see SECURITY.md).
+    # NO cap_drop here (verified live): the entrypoint drops privileges via
+    # setpriv (`setresuid failed` with ALL dropped → exit 127 loop). Same for
+    # read_only. Containment: no published ports + internal net + auth required.
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep -q PONG"]
       interval: 5s

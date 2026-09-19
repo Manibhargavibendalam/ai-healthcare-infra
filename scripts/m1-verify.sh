@@ -5,6 +5,9 @@
 # (shell access, not network exposure). Fail-fast.
 # Run from repo root in Git Bash:  bash scripts/m1-verify.sh
 set -uo pipefail
+# Git Bash on Windows mangles /container/paths for docker.exe; all paths
+# in this script are container-internal, so disable conversion entirely.
+export MSYS2_ARG_CONV_EXCL='*'
 A=http://127.0.0.1:8080
 set -a; source .env; set +a
 pass=0
@@ -17,7 +20,7 @@ epost() { docker compose exec -T "$1" python /scripts/svc.py "$2" POST "$3" "$4"
 eget()  { docker compose exec -T "$1" python /scripts/svc.py "$2" GET "$3"; }         # svc port path
 post_job() { curl -s -X POST "$A/api/v1/jobs" -H 'Content-Type: application/json' -d '{"type":"appointment","patient_id":1}'; }
 job_id_of() { echo "$1" | grep -o '"job_id":[0-9]*' | grep -o '[0-9]*'; }
-set_mode() { epost ehr-mock 8002 /mode "{\"mode\":\"$1\"}" | grep -q '"mode": *"'"$1"'"' || die "set ehr $1" -; ok "ehr mode=$1"; }
+set_mode() { epost ehr 8002 /mode "{\"mode\":\"$1\"}" | grep -q '"mode": *"'"$1"'"' || die "set ehr $1" -; ok "ehr mode=$1"; }
 wait_status() { # $1=id $2=want $3=max-iterations(2s each)
   for _ in $(seq 1 "$3"); do
     s=$(curl -s "$A/api/v1/jobs/$1")
@@ -27,13 +30,19 @@ wait_status() { # $1=id $2=want $3=max-iterations(2s each)
   die "job $1 -> $2" "$s"
 }
 
+echo "== reset: hermetic start (modes to defaults) =="
+docker compose start worker ai ehr >/dev/null 2>&1 || true
+epost ehr 8002 /mode '{"mode":"normal"}' >/dev/null 2>&1 || true
+docker compose exec -T ai python /scripts/svc.py 8001 POST /mode '{"mode":"ok"}' >/dev/null 2>&1 || true
+sleep 5
+
 echo "== T1 ingress health, registry, metrics, boundary =="
 have "via nginx /health"  "$(curl -s $A/health)"                '"status":"ok"'
 have "via nginx /ready"   "$(curl -s $A/ready)"                 '"status":"ready"'
 have "nginx self-check"   "$(curl -s http://127.0.0.1:8080/healthz)" 'ok'
 have "ai /health (exec)"  "$(eget ai 8001 /health)"             '"service": *"ai"'
 have "ai /ready (exec)"   "$(eget ai 8001 /ready)"              '"status": *"ready"'
-have "ehr /health (exec)" "$(eget ehr-mock 8002 /health)"       '"mode": *"normal"'
+have "ehr /health (exec)" "$(eget ehr 8002 /health)"             '"mode": *"normal"'
 have "patients"           "$(curl -s $A/api/v1/patients)"       'Patient-01'
 have "hospitals"          "$(curl -s $A/api/v1/hospitals)"      'Test General Hospital'
 have "api metrics"        "$(curl -s $A/metrics)"               'api_jobs_enqueued_total'
@@ -114,7 +123,11 @@ AP=$(curl -s -X POST "$A/api/v1/appointments" -H 'Content-Type: application/json
 echo "$AP" | grep -q '"ai_degraded":true' || { docker compose start ai >/dev/null; die "ai_degraded true" "$AP"; }
 echo "$AP" | grep -q '"risk":null' || { docker compose start ai >/dev/null; die "risk null" "$AP"; }
 ok "appointment created with ai_degraded=true, risk=null"
-docker compose start ai >/dev/null; sleep 5
+docker compose start ai >/dev/null
+for _ in $(seq 1 24); do
+  eget ai 8001 /health 2>/dev/null | grep -q '"status": *"ok"' && break
+  sleep 5
+done
 AP2=$(curl -s -X POST "$A/api/v1/appointments" -H 'Content-Type: application/json' -d '{"patient_id":2,"doctor_id":2,"scheduled_at":"2026-10-02T10:00:00"}')
 echo "$AP2" | grep -q '"ai_degraded":false' || die "ai recovered" "$AP2"; ok "ai recovered: risk assigned"
 

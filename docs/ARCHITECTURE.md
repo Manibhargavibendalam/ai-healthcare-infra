@@ -1,16 +1,24 @@
+
+
 # ARCHITECTURE
 
-The single architecture document (§26 deliverable #1): system, boundaries,
+The single architecture document (§25 deliverable #1): system, boundaries,
 security model, deployment, reliability, observability, failures, recovery,
-decisions. Detail lives in the linked files; this is the map.
+and engineering decisions. Detail lives in the linked documents; this is the
+primary architectural map.
 
 ## System
 
-Client → NGINX `:8080` (sole published port) → API `:8000` (DMZ, dual-homed)
-→ internal net: AI `:8001`, EHR `:8002`, Redis (queue), PostgreSQL (state),
-worker (no ports). Monitoring overlay (Prometheus `:9090`, Grafana `:3000`,
-Alertmanager → alert-api) scrapes container-local `/metrics` on `internal`.
-Canonical diagram: `./architecture.mmd` (same directory).
+Client → NGINX `:8080` → API `:8000` → internal services.
+
+The API is dual-homed between the `edge` and `internal` networks. AI,
+EHR, Redis, PostgreSQL, and the worker operate on the internal network.
+The worker exposes no application port.
+
+Monitoring is provided through Prometheus, Grafana, and Alertmanager,
+with service metrics scraped from the internal network.
+
+Canonical diagram: `./architecture.mmd`.
 
 ## Network boundaries
 

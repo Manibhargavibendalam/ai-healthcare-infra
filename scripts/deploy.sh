@@ -11,6 +11,9 @@
 #            candidate /ready 503s via BREAK_READY, release blocked, old serves)
 # CI calls it with the commit sha. Needs the base stack already up.
 set -uo pipefail
+# Git Bash on Windows mangles /container/paths for docker.exe; all paths
+# in this script are container-internal, so disable conversion entirely.
+export MSYS2_ARG_CONV_EXCL='*'
 VERSION="${1:?usage: bash scripts/deploy.sh <version> [--broken]}"
 export API_TAG="$VERSION"
 export API_VERSION="$VERSION" # surfaces in GET /health + api_build_info

@@ -4,6 +4,9 @@
 # reach internal-only services, (3) the intended path works, (4) limits set.
 # Run from repo root in Git Bash:  bash scripts/net-audit.sh
 set -uo pipefail
+# Git Bash on Windows mangles /container/paths for docker.exe; all paths
+# in this script are container-internal, so disable conversion entirely.
+export MSYS2_ARG_CONV_EXCL='*'
 NET=ai-healthcare-infra_edge
 pass=0
 ok() { echo "PASS: $1"; pass=$((pass+1)); }
@@ -12,20 +15,26 @@ die() { echo "FAIL: $1"; echo "  got: $2"; exit 1; }
 echo "== 1. published host ports: only nginx :8080 =="
 PUB=$(docker ps --format '{{.Names}} {{.Ports}}' | grep -v '^$' || true)
 echo "$PUB"
-echo "$PUB" | grep -q '0.0.0.0:8080->8080' || die "nginx :8080 published" "$PUB"
+echo "$PUB" | grep -q '127.0.0.1:8080->8080' || die "nginx :8080 published" "$PUB"
+echo "$PUB" | grep -q '0.0.0.0:8080' && die "nginx on LAN, want host-local" "$PUB" || true
+ok "nginx :8080 host-local only (no 0.0.0.0)"
 for svc in db redis api ai ehr worker; do
   echo "$PUB" | grep -E "m1?[-_]${svc}[-_][0-9]|/${svc} " | grep -q '0.0.0.0' \
     && die "$svc publishes host ports" "$PUB" || true
 done
 ok "only nginx publishes a host port"
 
-echo "== 2. compose port map per service =="
+echo "== 2. host port bindings per service (inspect, authoritative) =="
 for svc in db redis api ai ehr worker; do
-  MAP=$(docker compose port "$svc" 8000 2>/dev/null; docker compose port "$svc" 5432 2>/dev/null; docker compose port "$svc" 6379 2>/dev/null; docker compose port "$svc" 8001 2>/dev/null; docker compose port "$svc" 8002 2>/dev/null; docker compose port "$svc" 8003 2>/dev/null)
-  [ -z "$MAP" ] || die "$svc has port map" "$MAP"
+  cid=$(docker compose ps -q "$svc")
+  BIND=$(docker inspect "$cid" --format '{{json .HostConfig.PortBindings}}')
+  { [ "$BIND" = "null" ] || [ "$BIND" = "{}" ]; } || die "$svc publishes host ports" "$BIND"
 done
-MAP=$(docker compose port nginx 8080); echo "$MAP" | grep -q 8080 || die "nginx :8080 map" "$MAP"
-ok "db/redis/api/ai/ehr/worker: no host port maps; nginx: :8080"
+ok "db/redis/api/ai/ehr/worker: PortBindings null"
+cid=$(docker compose ps -q nginx)
+BIND=$(docker inspect "$cid" --format '{{json .HostConfig.PortBindings}}')
+echo "$BIND" | grep -q '8080' || die "nginx :8080 map" "$BIND"
+ok "nginx publishes :8080 only"
 
 echo "== 3. segmentation: edge guest can reach api, NOT db/redis =="
 IMG=python:3.12.14-slim

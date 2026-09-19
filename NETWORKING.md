@@ -49,7 +49,7 @@ is refused — the e2e script asserts this.
 
 Worker is the ONLY client (`EHR_URL=http://ehr:8002`, internal DNS). The EHR
 initiates nothing inbound. Failure modes are server-side switches; true
-unreachability is `docker compose stop ehr-mock` (connection-refused path).
+unreachability is `docker compose stop ehr` (connection-refused path).
 Per-call timeout (5s) + bounded backoff retries + fail-fast auth + no-retry
 unknown-outcome complete the control story (see DECISIONS.md D5/D16/D17).
 

@@ -1,5 +1,5 @@
 # Generic failure injector: stops any service. Specific scenarios have
-# dedicated scripts (fail-worker/api/db); use this for the rest (ai, ehr-mock, redis, nginx).
+# dedicated scripts (fail-worker/api/db); use this for the rest (ai, ehr, redis, nginx).
 # Run: powershell -ExecutionPolicy Bypass -File scripts\fail-service.ps1 -Service ai
 param([Parameter(Mandatory=$true)][string]$Service)
 $ErrorActionPreference = 'Stop'
