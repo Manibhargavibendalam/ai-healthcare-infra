@@ -13,9 +13,9 @@ reference them); `docs/` holds the 7 syntheses with no root equivalent.
 | 1 Core objective | prod-like local sim, 15 evaluator abilities | full stack + runbook | compose*.yaml, DEMO_RUNBOOK.md | §1 foundation tests | 71 pytest pass | PARTIAL |
 | 2 Strategy | lean stack, no k8s/kafka/mesh | compose+TF mirror, 6 services | DECISIONS.md D1/D11/D26 | test_compose_structure | no k8s manifests exist | PASS |
 | 3 Structure | clean repo, separated concerns | services/infra/scripts/tests/docs + root docs | repo tree | test files-exist (foundation) | `ls` inventory 20 commits | PASS |
-| 4 Platform | api/ai/worker/postgres/ehr + endpoints | FastAPI mocks, 7 EHR modes, /version + /admin/mode + /ehr/sync aliases | services/*/app/main.py | 30+ unit tests (modes/matrix/ready) | pytest green | PARTIAL |
-| 5 Queue | Redis backlog/retry/fail + 6 named metrics | lists + delay ZSET + `worker_processing_seconds` added | services/worker/worker.py | queue-math/backoff tests, T2–T9 scripted | pytest green | PARTIAL |
-| 6 Network | edge/internal, private DB/redis/worker/AI | no published ports except :8080; negative-test script | compose.yaml, NETWORKING.md | test_compose_structure, net-audit.sh | config valid | PARTIAL |
+| 4 Platform | api/ai/worker/postgres/ehr + endpoints | FastAPI mocks, 7 EHR modes, /version + /admin/mode + /ehr/sync aliases | services/*/app/main.py | 30+ unit tests + T1–T10 LIVE PASS (49 checks) | live green | PARTIAL |
+| 5 Queue | Redis backlog/retry/fail + 6 named metrics | lists + delay ZSET + `worker_processing_seconds` added | services/worker/worker.py | queue-math tests + T2–T3/T6–T9 LIVE PASS | live green | PARTIAL |
+| 6 Network | edge/internal, private DB/redis/worker/AI | no published ports except :8080; negative-test script | compose.yaml, NETWORKING.md | test_compose_structure + net-audit LIVE PASS (9 checks) | live green | PARTIAL |
 | 7 IaC | reproducible TF, dev+prod, full lifecycle docs | 6 modules, thin envs, README lifecycle | terraform/ | fmt/validate/fmt-check + layout tests | dev+prod valid | PARTIAL |
 | 8 Environments | dev + prod-like, shared defs | identical module calls, tfvars-only diffs | terraform/environments/ | validate both, diff-able | both valid | PASS |
 | 9 Security arch | network + least-privilege (5 roles) | SGs, 5-role matrix, exec/task split | SECURITY.md, TF security/ | policy tests | gitleaks clean | PARTIAL |
